@@ -1,6 +1,5 @@
 ﻿using System.Collections;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -12,12 +11,20 @@ namespace QuickMapper;
 /// </summary>
 public static class QuickMapper
 {
-    private static readonly Dictionary<string, Func<object, object>> CustomMappers = new Dictionary<string, Func<object, object>>();
-    private static readonly Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]> CachedMappings = new Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]>();
+    private static readonly Lazy<Dictionary<string, Func<object, object>>> LazyCustomMappers =
+    new Lazy<Dictionary<string, Func<object, object>>>(() => new Dictionary<string, Func<object, object>>());
+    private static Dictionary<string, Func<object, object>> CustomMappers => LazyCustomMappers.Value;
+
+    private static readonly Lazy<Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]>> LazyCachedMappings =
+      new Lazy<Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]>>(() => new Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]>());
+    private static Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]> CachedMappings => LazyCachedMappings.Value;
 
     private static readonly object CustomMapperLock = new object();
     private static readonly object CachedMappingLock = new object();
-    private static readonly List<ITypeConverter> TypeConverters = new List<ITypeConverter>();
+    private static readonly Lazy<List<ITypeConverter>> LazyTypeConverters =
+     new Lazy<List<ITypeConverter>>(() => new List<ITypeConverter>());
+    private static List<ITypeConverter> TypeConverters => LazyTypeConverters.Value;
+
 
     private static readonly ConcurrentDictionary<string, Delegate> CachedDelegates = new ConcurrentDictionary<string, Delegate>();
     static ConcurrentDictionary<string, List<PropertyMatchingInfo>> CachedMatchingProps = new ConcurrentDictionary<string, List<PropertyMatchingInfo>>();
@@ -51,7 +58,6 @@ public static class QuickMapper
             }
         }
 
-        // Cache source and target properties to minimize reflection calls
         if (!SourceTypePropertiesCache.TryGetValue(sourceType, out var sourceProperties))
         {
             sourceProperties = sourceType.GetProperties().ToDictionary(p => p.Name, p => p);
@@ -236,18 +242,14 @@ public static class QuickMapper
         var targetConstructor = typeof(TTarget).GetConstructor(Type.EmptyTypes);
         var local = generator.DeclareLocal(typeof(TTarget));
 
-        // Generate IL code for object initialization
         generator.Emit(OpCodes.Newobj, targetConstructor);
         generator.Emit(OpCodes.Stloc, local);
 
-        // Retrieve or calculate matching properties between source and target
         var key = $"{typeof(TSource).FullName}->{typeof(TTarget).FullName}";
         var matchingProps = CachedMatchingProps.GetOrAdd(key, k => FindMatchingProperties<TSource, TTarget>());
 
-        // Generate IL code for property assignment
         EmitPropertyMappingILCode(generator, local, matchingProps, skipNulls);
 
-        // Compile to delegate
         return dynamicMethod.CreateDelegate(typeof(Func<TSource, TTarget>));
     }
 
@@ -260,7 +262,6 @@ public static class QuickMapper
 
     private static void EmitPropertyMappingILCode(ILGenerator generator, LocalBuilder local, List<PropertyMatchingInfo> matchingProps, bool skipNulls)
     {
-        // Pre-cache get and set methods outside the loop to improve performance.
         var getSourceMethods = new List<MethodInfo>();
         var setTargetMethods = new List<MethodInfo>();
         var notNullLabels = new List<Label>();
@@ -282,8 +283,6 @@ public static class QuickMapper
 
         for (int i = 0; i < matchingProps.Count; i++)
         {
-            var match = matchingProps[i];
-
             if (skipNulls && notNullLabels[i] != default)
             {
                 generator.Emit(OpCodes.Ldarg_0);
@@ -338,9 +337,14 @@ public static class QuickMapper
     }
 
 
+    private static readonly Lazy<ConcurrentDictionary<PropertyInfo, Func<object, object>>> LazyGettersCache =
+    new Lazy<ConcurrentDictionary<PropertyInfo, Func<object, object>>>(() => new ConcurrentDictionary<PropertyInfo, Func<object, object>>());
+    private static ConcurrentDictionary<PropertyInfo, Func<object, object>> _gettersCache => LazyGettersCache.Value;
 
-    private static ConcurrentDictionary<PropertyInfo, Func<object, object>> _gettersCache = new ConcurrentDictionary<PropertyInfo, Func<object, object>>();
-    private static ConcurrentDictionary<PropertyInfo, Action<object, object>> _settersCache = new ConcurrentDictionary<PropertyInfo, Action<object, object>>();
+    private static readonly Lazy<ConcurrentDictionary<PropertyInfo, Action<object, object>>> LazySettersCache =
+        new Lazy<ConcurrentDictionary<PropertyInfo, Action<object, object>>>(() => new ConcurrentDictionary<PropertyInfo, Action<object, object>>());
+    private static ConcurrentDictionary<PropertyInfo, Action<object, object>> _settersCache => LazySettersCache.Value;
+
 
     private static Func<object, object> GetGetter(PropertyInfo property)
     {
