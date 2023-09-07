@@ -33,15 +33,15 @@ public static class ObjectMappingExtensions
     /// <param name="ignoreMissing">Whether to ignore missing properties during mapping.</param>
     /// <param name="performanceLogging">Whether to enable performance logging.</param>
     /// <returns>A new object of type T with mapped properties.</returns>
-    public static T MapTo<T>(this object source, bool skipNulls, bool ignoreMissing, bool performanceLogging = false) where T : new()
-    {
-        if (source == null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
+    //public static T MapTo<T>(this object source, bool skipNulls, bool ignoreMissing, bool performanceLogging = false) where T : new()
+    //{
+    //    if (source == null)
+    //    {
+    //        throw new ArgumentNullException(nameof(source));
+    //    }
 
-        return QuickMapper.Map<object, T>(source, skipNulls, ignoreMissing, performanceLogging);
-    }
+    //    return QuickMapper.Map<object, T>(source, skipNulls, ignoreMissing, performanceLogging);
+    //}
 
     /// <summary>
     /// Maps the properties of the source object to a new object of type T and allows additional configuration.
