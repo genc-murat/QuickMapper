@@ -230,12 +230,14 @@ public static class QuickMapper
         return (Func<TSource, TTarget>)mapDelegate;
     }
 
+    private static readonly ConcurrentDictionary<Type, ConstructorInfo> ConstructorCache = new ConcurrentDictionary<Type, ConstructorInfo>();
 
     private static Delegate GenerateMappingDelegate<TSource, TTarget>(bool skipNulls)
     {
         var dynamicMethod = CreateDynamicMappingMethod<TSource, TTarget>();
         var generator = dynamicMethod.GetILGenerator();
-        var targetConstructor = typeof(TTarget).GetConstructor(Type.EmptyTypes);
+        var targetType = typeof(TTarget);
+        var targetConstructor = ConstructorCache.GetOrAdd(targetType, t => t.GetConstructor(Type.EmptyTypes));
         var local = generator.DeclareLocal(typeof(TTarget));
 
         generator.Emit(OpCodes.Newobj, targetConstructor);
@@ -244,7 +246,7 @@ public static class QuickMapper
         var key = $"{typeof(TSource).FullName}->{typeof(TTarget).FullName}";
         var matchingProps = CachedMatchingProps.GetOrAdd(key, k => FindMatchingProperties<TSource, TTarget>());
 
-        EmitPropertyMappingILCode(generator, local, matchingProps, skipNulls);
+        EmitPropertyMappingILCode(generator, local, matchingProps.ToArray(), skipNulls);
 
         return dynamicMethod.CreateDelegate(typeof(Func<TSource, TTarget>));
     }
@@ -256,40 +258,46 @@ public static class QuickMapper
     }
 
 
-    private static void EmitPropertyMappingILCode(ILGenerator generator, LocalBuilder local, List<PropertyMatchingInfo> matchingProps, bool skipNulls)
+    private static void EmitPropertyMappingILCode(ILGenerator generator, LocalBuilder local, PropertyMatchingInfo[] matchingProps, bool skipNulls)
     {
-        var getSourceMethods = new List<MethodInfo>();
-        var setTargetMethods = new List<MethodInfo>();
-        var notNullLabels = new List<Label>();
+        MethodInfo[] getSourceMethods = new MethodInfo[matchingProps.Length];
+        MethodInfo[] setTargetMethods = new MethodInfo[matchingProps.Length];
+        Label[] notNullLabels = new Label[matchingProps.Length];
 
-        foreach (var match in matchingProps)
+        var op_Ldarg_0 = OpCodes.Ldarg_0;
+        var op_Ldloc = OpCodes.Ldloc;
+        var op_Callvirt = OpCodes.Callvirt;
+        var op_Brtrue_S = OpCodes.Brtrue_S;
+
+        for (int i = 0; i < matchingProps.Length; i++)
         {
-            getSourceMethods.Add(match.SourceProperty.GetGetMethod());
-            setTargetMethods.Add(match.TargetProperty.GetSetMethod());
+            var match = matchingProps[i];
+            getSourceMethods[i] = match.SourceProperty.GetGetMethod();
+            setTargetMethods[i] = match.TargetProperty.GetSetMethod();
 
             if (skipNulls && !match.SourceProperty.PropertyType.IsValueType)
             {
-                notNullLabels.Add(generator.DefineLabel());
+                notNullLabels[i] = generator.DefineLabel();
             }
             else
             {
-                notNullLabels.Add(default);
+                notNullLabels[i] = default;
             }
         }
 
-        for (int i = 0; i < matchingProps.Count; i++)
+        for (int i = 0; i < matchingProps.Length; i++)
         {
             if (skipNulls && notNullLabels[i] != default)
             {
-                generator.Emit(OpCodes.Ldarg_0);
-                generator.Emit(OpCodes.Callvirt, getSourceMethods[i]);
-                generator.Emit(OpCodes.Brtrue_S, notNullLabels[i]);
+                generator.Emit(op_Ldarg_0);
+                generator.Emit(op_Callvirt, getSourceMethods[i]);
+                generator.Emit(op_Brtrue_S, notNullLabels[i]);
             }
 
-            generator.Emit(OpCodes.Ldloc, local);
-            generator.Emit(OpCodes.Ldarg_0);
-            generator.Emit(OpCodes.Callvirt, getSourceMethods[i]);
-            generator.Emit(OpCodes.Callvirt, setTargetMethods[i]);
+            generator.Emit(op_Ldloc, local);
+            generator.Emit(op_Ldarg_0);
+            generator.Emit(op_Callvirt, getSourceMethods[i]);
+            generator.Emit(op_Callvirt, setTargetMethods[i]);
 
             if (skipNulls && notNullLabels[i] != default)
             {
@@ -297,7 +305,7 @@ public static class QuickMapper
             }
         }
 
-        generator.Emit(OpCodes.Ldloc, local);
+        generator.Emit(op_Ldloc, local);
         generator.Emit(OpCodes.Ret);
     }
 
