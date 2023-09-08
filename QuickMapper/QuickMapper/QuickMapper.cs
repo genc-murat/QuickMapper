@@ -429,14 +429,9 @@ public static class QuickMapper
         int count = list.Count;
         var array = Array.CreateInstance(itemType, count);
 
-        object[] objectArray = array as object[];
-
-        if (objectArray != null)
+        if (array is object[] objectArray)
         {
-            for (int i = 0; i < count; ++i)
-            {
-                objectArray[i] = list[i];
-            }
+            Array.Copy(list as Array, objectArray, count);
         }
         else
         {
@@ -448,5 +443,4 @@ public static class QuickMapper
 
         return array;
     }
-
 }
