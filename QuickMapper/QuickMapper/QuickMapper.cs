@@ -19,8 +19,8 @@ public static class QuickMapper
       new Lazy<Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]>>(() => new Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]>());
     private static Dictionary<string, (PropertyInfo SourceProperty, PropertyInfo TargetProperty)[]> CachedMappings => LazyCachedMappings.Value;
 
-    private static readonly object CustomMapperLock = new object();
-    private static readonly object CachedMappingLock = new object();
+    //private static readonly object CustomMapperLock = new object();
+    //private static readonly object CachedMappingLock = new object();
     private static readonly Lazy<List<ITypeConverter>> LazyTypeConverters =
      new Lazy<List<ITypeConverter>>(() => new List<ITypeConverter>());
     private static List<ITypeConverter> TypeConverters => LazyTypeConverters.Value;
@@ -36,11 +36,10 @@ public static class QuickMapper
 
     public static void RegisterCustomMapper<TSource, TTarget>(Func<TSource, TTarget> mapper)
     {
-        lock (CustomMapperLock)
-        {
-            string key = $"{typeof(TSource).FullName}->{typeof(TTarget).FullName}";
-            CustomMappers[key] = x => mapper((TSource)x);
-        }
+
+        string key = $"{typeof(TSource).FullName}->{typeof(TTarget).FullName}";
+        CustomMappers[key] = x => mapper((TSource)x);
+
     }
 
     private static readonly Dictionary<Type, Dictionary<string, PropertyInfo>> SourceTypePropertiesCache = new Dictionary<Type, Dictionary<string, PropertyInfo>>();
@@ -50,13 +49,12 @@ public static class QuickMapper
     {
         string key = $"{sourceType.FullName}->{targetType.FullName}";
 
-        lock (CachedMappingLock)
+
+        if (CachedMappings.TryGetValue(key, out var mappings))
         {
-            if (CachedMappings.TryGetValue(key, out var mappings))
-            {
-                return mappings;
-            }
+            return mappings;
         }
+
 
         if (!SourceTypePropertiesCache.TryGetValue(sourceType, out var sourceProperties))
         {
@@ -93,10 +91,9 @@ public static class QuickMapper
 
         var resultArray = newMappings.ToArray();
 
-        lock (CachedMappingLock)
-        {
-            CachedMappings[key] = resultArray;
-        }
+
+        CachedMappings[key] = resultArray;
+
 
         return resultArray;
     }
@@ -111,14 +108,13 @@ public static class QuickMapper
         }
 
         Func<object, object> customMapper;
-        lock (CustomMapperLock)
+
+        string key = $"{typeof(TSource).FullName}->{typeof(TTarget).FullName}";
+        if (CustomMappers.TryGetValue(key, out customMapper))
         {
-            string key = $"{typeof(TSource).FullName}->{typeof(TTarget).FullName}";
-            if (CustomMappers.TryGetValue(key, out customMapper))
-            {
-                return (TTarget)customMapper(source);
-            }
+            return (TTarget)customMapper(source);
         }
+
 
         if (typeof(IEnumerable).IsAssignableFrom(typeof(TTarget)) && source is IEnumerable sourceEnumerable)
         {
@@ -348,7 +344,8 @@ public static class QuickMapper
 
     private static Func<object, object> GetGetter(PropertyInfo property)
     {
-        return _gettersCache.GetOrAdd(property, prop => {
+        return _gettersCache.GetOrAdd(property, prop =>
+        {
             var parameter = Expression.Parameter(typeof(object));
             var cast = Expression.Convert(parameter, prop.DeclaringType);
             var propertyAccess = Expression.Property(cast, prop);
@@ -359,7 +356,8 @@ public static class QuickMapper
 
     private static Action<object, object> GetSetter(PropertyInfo property)
     {
-        return _settersCache.GetOrAdd(property, prop => {
+        return _settersCache.GetOrAdd(property, prop =>
+        {
             var instance = Expression.Parameter(typeof(object));
             var argument = Expression.Parameter(typeof(object));
             var instanceCast = Expression.Convert(instance, prop.DeclaringType);
